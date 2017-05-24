@@ -32,7 +32,7 @@ if int(peer_addr[3]) == 0:
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("", localPort))
     retry_time = 1
-    if peer_addr[4] == 0:
+    if int(peer_addr[4]) == 0:
         # local nat is a port preservation nat, we could try multiple times
         retry_time = 100
         # if local is not port preservation nat, only one try is needed (more connection would use other port)
