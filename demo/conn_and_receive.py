@@ -45,6 +45,7 @@ if int(peer_addr[3]) == 0:
             sock.bind(("", localPort))
             sock.connect(peerInfo)
             print("connect")
+            sock.settimeout(None)
             sock.send(str(random.randint(1000, 9999)).encode())
             print('received: ' + sock.recv(1024).decode())
             break
