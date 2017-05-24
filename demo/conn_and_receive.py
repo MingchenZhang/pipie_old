@@ -38,8 +38,8 @@ if int(peer_addr[3]) == 0:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect(peerInfo)
             sock.bind(("", localPort))
+            sock.connect(peerInfo)
             print("connect")
             sock.send(str(random.randint(1000, 9999)).encode())
             print('received: ' + sock.recv(1024).decode())
