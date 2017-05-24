@@ -1,7 +1,8 @@
-import selectors
+#import selectors
 import socket
 import random
 from time import sleep
+#import fcntl, os
 
 import time
 import traceback
@@ -37,6 +38,8 @@ if int(peer_addr[3]) == 0:
         # and if remote computer reject the connection right away, there is no way to establish tcp connection.
     for i in range(0, retry_time):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        #fcntl.fcntl(sock, fcntl.F_SETFL, os.O_NONBLOCK)
         try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("", localPort))
