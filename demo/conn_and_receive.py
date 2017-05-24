@@ -1,6 +1,7 @@
 import selectors
 import socket
 import random
+from time import sleep
 
 import time
 import traceback
@@ -47,6 +48,7 @@ if int(peer_addr[3]) == 0:
         except socket.error as e:
             print('port ' + peer_addr[1] + ' failed to connect')
             # traceback.print_exc()
+            sleep(random.random())
             continue
         finally:
             sock.close()
