@@ -52,7 +52,7 @@ if int(peer_addr[3]) == 0:
         except socket.error as e:
             print('port ' + peer_addr[1] + ' failed to connect')
             # traceback.print_exc()
-            sleep(random.random())
+            sleep(random.random()/5.0)
             continue
         finally:
             sock.close()
