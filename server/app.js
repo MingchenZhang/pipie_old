@@ -78,7 +78,7 @@ ws.on('connection', function connection(ws) {
 var traversalServer = Net.createServer(function(socket) {
     socket.on('data', function (data) {
         // TODO: handle packet fragmentation problem
-        // server expects {exchangeToken:"1233421", sourcePort:"32323"}
+        // server expects {exchangeToken:"1233421", sourcePort:32323}
         let info = JSON.parse(data.toString('utf8'));
         let token = info.exchangeToken;
         let sourcePort = parseInt(info.sourcePort);
@@ -98,7 +98,7 @@ var traversalServer = Net.createServer(function(socket) {
         }else if(typeof peerInfoExchangeToken[token] == 'object'){
             // this is the second client
             // send the following to both peers
-            // "peerPublicIP|peerPublicPort|peerSourcePort|myPortPreserve|peerPortPreserve"
+            // "{peerPublicIP, peerPublicPort, peerSourcePort, myPortPreserve, peerPortPreserve}"
             let client1Info = peerInfoExchangeToken[token];
             socket.send(JSON.stringify({
                 type:'success',
