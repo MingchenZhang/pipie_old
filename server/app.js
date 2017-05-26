@@ -4,12 +4,12 @@ const MAX_GIVEN_NAME_DIGIT = 8;
 const MAX_EXCHANGE_TOKEN_DIGIT = 8;
 
 
-const wss = new WebSocket.Server({ port: 443 });
 
 var nameMap = {};
 var peerInfoExchangeToken = {}; // TODO: might leak token if it is not used, add a timer to expire
 
-wss.on('connection', function connection(ws) {
+var ws = new WebSocket.Server({ port: 8080 });
+ws.on('connection', function connection(ws) {
     ws.on('message', function (message) {
         try{
             message = JSON.parse(message);
@@ -144,6 +144,7 @@ var relayServer = Net.createServer(function(socket) {
         if(!relayTokenMatch[token]){
             // first in the relay pair
             relayTokenMatch[token] = socket;
+            socket.token = token;
         }else{
             // send in the relay pair, start pipe
             socket.pipe(relayTokenMatch[token]);
@@ -152,6 +153,9 @@ var relayServer = Net.createServer(function(socket) {
             relayTokenMatch[token].on('close', () => {socket.close();});
             delete relayTokenMatch[token];
         }
+    });
+    socket.on('close', ()=>{
+        if(socket.token) delete relayTokenMatch[socket.token];
     });
 });
 relayServer.listen(4396);
