@@ -9,9 +9,9 @@ import selectors
 import errno
 
 DEBUG = True
-CONTROL_SERVER = 'ws://104.236.245.187:8080/'
-TRAVERSAL_SERVER = '104.236.245.187:3735'
-RELAY_SERVER = '104.236.245.187:4396'
+CONTROL_SERVER = 'ws://104.236.245.187/'
+TRAVERSAL_SERVER = ('104.236.245.187', 3735)
+RELAY_SERVER = ('104.236.245.187', 4396)
 
 
 def eprint(*args, **kwargs):
@@ -23,23 +23,25 @@ def debug(*args, **kwargs):
         eprint(*args, **kwargs)
 
 
-def tcp_traversal(exchange_token):
-    peerInfo = socket.getnameinfo(TRAVERSAL_SERVER, 0)
+def tcp_traversal(exchange_token, role='not given'):
+    peerInfo = TRAVERSAL_SERVER
     serverSocket = socket.create_connection(peerInfo)
     localInfo = serverSocket.getsockname()
     # send local port info to server
-    serverSocket.send(json.dumps({'sourcePort': localInfo[1], 'exchangeToken': str(exchange_token)}).encode())
+    serverSocket.send(
+        json.dumps({'sourcePort': localInfo[1], 'exchangeToken': str(exchange_token), 'role': role}).encode())
     msg = json.loads(serverSocket.recv(1024).decode())
-    debug('from traversal helper server:' + msg)
+    debug('from traversal helper server:' + str(msg))
 
     serverSocket.close()
 
-    if int(msg.myPortPreserve) == 0:  # remote is port preservation nat (good)
+    if msg['peerPortPreserve']:  # remote is port preservation nat (good)
+        peerInfo = (msg['peerPublicIP'], int(msg['peerPublicPort']))
         debug('Instructed to directly connect. Connecting to: ')
-        peerInfo = (msg.peerPublicIP, int(msg.peerPublicPort))
         debug(peerInfo)
+        debug('local bind to '+str(localInfo))
         retry_time = 1
-        if int(msg.peerPortPreserve) == 0:  # local nat is a port preservation nat, we could try multiple times
+        if msg['myPortPreserve']:  # local nat is a port preservation nat, we could try multiple times
             retry_time = 50
             # if local is not port preservation nat, only one try is needed (more connection would use other port)
             # and if remote computer reject the connection right away, there is no way to establish tcp connection.
@@ -54,7 +56,7 @@ def tcp_traversal(exchange_token):
                 success = True
                 return sock
             except socket.error as e:
-                debug('port ' + msg.peerPublicPort + ' failed to connect')
+                debug('port ' + str(msg['peerPublicPort']) + ' failed to connect')
                 # traceback.print_exc()
                 time.sleep(random.random() / 5.0)
                 continue
@@ -62,11 +64,11 @@ def tcp_traversal(exchange_token):
                 if not success:
                     sock.close()
     else:  # remote nat has some algorithm involved, need some guessing
-        initialPort = int(msg.peerPublicPort)
+        initialPort = int(msg['peerPublicPort'])
         scanning_range = 100
         debug('Instructed to scan ports. Scanning ports [' + str(initialPort) + ', ' +
               str(initialPort + scanning_range) + ']')
-        for i in range(0, 100):
+        for i in range(0, scanning_range):
             remotePort = initialPort + i
             debug('trying port: ' + str(remotePort))
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -75,9 +77,9 @@ def tcp_traversal(exchange_token):
             success = False
             try:
                 sock.settimeout(1)
-                sock.connect((msg.peerPublicIP, remotePort))
+                sock.connect((msg['peerPublicIP'], remotePort))
                 sock.settimeout(60)
-                debug("connect")
+                debug("connected")
                 success = True
                 return sock
             except socket.error as e:
@@ -104,7 +106,58 @@ if arguments.name is None or arguments.password is None:
 try:
     if arguments.mode == 'pipe':
         if arguments.role == 'client':
-            pass
+            ws = websocket.create_connection(CONTROL_SERVER)
+            request = {'type': 'start_pipe_request', 'connectTo': arguments.name, "accessPassword": arguments.password}
+            ws.send(json.dumps(request))
+            eprint('attempt to connect to ' + str(arguments.name))
+            response = json.loads(ws.recv())
+            if response["type"] == "error":
+                eprint('server returned error, error: ' + str(response["message"]))
+                exit(1)
+            if response["type"] != "start_pipe":
+                eprint('server response abnormal, error: ' + str(response))
+                exit(1)
+            eprint('attempt to traverse to ' + str(arguments.name))
+            # now attempt traversal using helper server
+            tcp_socket = tcp_traversal(response["exchangeToken"], role='client')
+            if tcp_socket is None:
+                eprint('traversal failed, abort action')
+                exit(1)
+            # define receive behavior
+            def recv_action(file_obj, mask):
+                received = None
+                try:
+                    received = file_obj.buffer.read()  # TODO: performance improvement can be made
+                except socket.error as e:
+                    err = e.args[0]
+                    if err != errno.EAGAIN and err != errno.EWOULDBLOCK:
+                        debug("error occurred on the stdin")
+                        return False
+                    else:  # file is not ended
+                        pass
+                if received is not None:
+                    if len(received) == 0:  # connection closed
+                        return False
+                    tcp_socket.send(received)
+                return True
+            import fcntl, os  # make stdin non block, which makes it not windows compatible
+            fd = sys.stdin.fileno()
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            pipe_selector = selectors.DefaultSelector()
+            pipe_selector.register(sys.stdin, selectors.EVENT_READ, recv_action)
+            selector_loop = True
+            while selector_loop:
+                try:
+                    events = pipe_selector.select()
+                except KeyboardInterrupt:
+                    selector_loop = False
+                if not recv_action(sys.stdin, None):
+                    selector_loop = False
+            tcp_socket.close()
+            eprint("(tcp socket is closed)")
+            eprint("exiting...")
+            exit(0)
         elif arguments.role == 'host':
             ws = websocket.create_connection(CONTROL_SERVER)
             request = {'type': 'register', 'accessPassword': arguments.password}
@@ -113,66 +166,74 @@ try:
             ws.send(json.dumps(request))
             eprint('trying to register')
             response = json.loads(ws.recv())
-            if response.type != 'registered':
-                eprint('unable to register, error: ' + str(response.message))
+            if response["type"] != 'registered':
+                eprint('unable to register, error: ' + str(response["message"]))
                 exit(1)
-            # save name and password
-            registerName = response.name
-            registerPassword = response.password
+            # save name
+            registerName = response["name"]
+            registerPassword = arguments.password
             eprint("successfully registered as " + str(registerName))
             eprint("Now waiting for requests...")
-            response = json.loads(ws.recv())
-            eprint("received request")
-            debug(response)
             while True:
-                if response.type == 'start_pipe':
+                response = json.loads(ws.recv())
+                eprint("received request")
+                debug(response)
+                if response["type"] == 'start_pipe':
                     eprint("start_pipe request received")
-                    if response.connectTo != registerName or response.accessPassword != registerPassword:
+                    if response["connectTo"] != registerName or response["accessPassword"] != registerPassword:
                         eprint('name or password received from server is illegal, abort action')
                         continue
                     # now attempt traversal using helper server
-                    tcp_socket = tcp_traversal(response.exchangeToken)
+                    tcp_socket = tcp_traversal(response["exchangeToken"], role='host')
                     if tcp_socket is None:
                         eprint('traversal failed, abort action')
                         continue
+                    eprint('traversal success, continue')
                     # set socket keep alive interval, in case NAT cut the connection
                     # see http://www.tldp.org/HOWTO/html_single/TCP-Keepalive-HOWTO/#setsockopt
                     tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     tcp_socket.setblocking(False)
                     # define receive behavior
-                    def recv_action(file_obj):
+                    def recv_action(file_obj, mask):
                         received = None
                         try:
                             received = file_obj.recv(4096)  # TODO: performance improvement can be made
                         except socket.error as e:
                             err = e.args[0]
                             if err != errno.EAGAIN and err != errno.EWOULDBLOCK:
-                                debug("error occurred on the tcp socket")
+                                debug("error occurred on the tcp")
                                 return False
-                        sys.stdout.write(received)
+                            else:  # file is not ended
+                                pass
+                        if received is not None:
+                            if len(received) == 0:  # connection closed
+                                return False
+                            sys.stdout.buffer.write(received)
                         return True
                     pipe_selector = selectors.DefaultSelector()
                     pipe_selector.register(tcp_socket, selectors.EVENT_READ, recv_action)
                     selector_loop = True
                     while selector_loop:
-                        events = pipe_selector.select()
-                        for key, mask in events:
-                            callback = key.data
-                            if not callback(key.fileobj, mask):
-                                selector_loop = False
-                    eprint("tcp socket is closed")
+                        try:
+                            events = pipe_selector.select()
+                        except KeyboardInterrupt:
+                            selector_loop = False
+                        if not recv_action(tcp_socket, None):
+                            selector_loop = False
+                    tcp_socket.close()
+                    eprint("(tcp socket is closed)")
                     eprint("exiting...")
                     exit(0)
-                elif response.type == 'error':
-                    eprint('receive error from server, error: ' + str(response.message))
+                elif response["type"] == 'error':
+                    eprint('receive error from server, error: ' + str(response["message"]))
                     exit(1)
                 else:
-                    eprint('receive unknown request, request type: ' + str(response.type))
+                    eprint('receive unknown request, request type: ' + str(response["type"]))
                     exit(1)
         else:
             eprint('role not recognized')
     else:
         eprint('working mode not recognized')
-except json.decoder.JSONDecodeError as e:
+except ValueError as e:
     eprint("decode server response error")
     exit(1)
