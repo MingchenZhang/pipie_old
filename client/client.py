@@ -129,7 +129,7 @@ try:
                 if len(data) == 0:  # no data will be available
                     break
                 try:
-                    tcp_socket.write(data)
+                    tcp_socket.send(data)
                 except OSError:
                     debug("socket write fail")
                     break
@@ -174,7 +174,7 @@ try:
                     tcp_socket.setblocking(False)
                     # client reads socket and forwards to stdout
                     while True:
-                        data = tcp_socket.read()
+                        data = tcp_socket.recv(2048)
                         if len(data) == 0:  # no data will be available
                             break
                         try:
