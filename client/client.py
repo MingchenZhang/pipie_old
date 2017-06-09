@@ -123,37 +123,16 @@ try:
             if tcp_socket is None:
                 eprint('traversal failed, abort action')
                 exit(1)
-            # define receive behavior
-            def recv_action(file_obj, mask):
-                received = None
+            # client reads stdin and forwards to socket
+            while True:
+                data = sys.stdin.read()
+                if len(data) == 0:  # no data will be available
+                    break
                 try:
-                    received = file_obj.buffer.read()  # TODO: performance improvement can be made
-                except socket.error as e:
-                    err = e.args[0]
-                    if err != errno.EAGAIN and err != errno.EWOULDBLOCK:
-                        debug("error occurred on the stdin")
-                        return False
-                    else:  # file is not ended
-                        pass
-                if received is not None:
-                    if len(received) == 0:  # connection closed
-                        return False
-                    tcp_socket.send(received)
-                return True
-            import fcntl, os  # make stdin non block, which makes it not windows compatible
-            fd = sys.stdin.fileno()
-            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-            pipe_selector = selectors.DefaultSelector()
-            pipe_selector.register(sys.stdin, selectors.EVENT_READ, recv_action)
-            selector_loop = True
-            while selector_loop:
-                try:
-                    events = pipe_selector.select()
-                except KeyboardInterrupt:
-                    selector_loop = False
-                if not recv_action(sys.stdin, None):
-                    selector_loop = False
+                    tcp_socket.write(data)
+                except OSError:
+                    debug("socket write fail")
+                    break
             tcp_socket.close()
             eprint("(tcp socket is closed)")
             eprint("exiting...")
@@ -193,33 +172,16 @@ try:
                     # see http://www.tldp.org/HOWTO/html_single/TCP-Keepalive-HOWTO/#setsockopt
                     tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     tcp_socket.setblocking(False)
-                    # define receive behavior
-                    def recv_action(file_obj, mask):
-                        received = None
+                    # client reads socket and forwards to stdout
+                    while True:
+                        data = tcp_socket.read()
+                        if len(data) == 0:  # no data will be available
+                            break
                         try:
-                            received = file_obj.recv(4096)  # TODO: performance improvement can be made
-                        except socket.error as e:
-                            err = e.args[0]
-                            if err != errno.EAGAIN and err != errno.EWOULDBLOCK:
-                                debug("error occurred on the tcp")
-                                return False
-                            else:  # file is not ended
-                                pass
-                        if received is not None:
-                            if len(received) == 0:  # connection closed
-                                return False
-                            sys.stdout.buffer.write(received)
-                        return True
-                    pipe_selector = selectors.DefaultSelector()
-                    pipe_selector.register(tcp_socket, selectors.EVENT_READ, recv_action)
-                    selector_loop = True
-                    while selector_loop:
-                        try:
-                            events = pipe_selector.select()
-                        except KeyboardInterrupt:
-                            selector_loop = False
-                        if not recv_action(tcp_socket, None):
-                            selector_loop = False
+                            sys.stdout.write(data)
+                        except OSError:
+                            debug("stdout write fail")
+                            break
                     tcp_socket.close()
                     eprint("(tcp socket is closed)")
                     eprint("exiting...")
