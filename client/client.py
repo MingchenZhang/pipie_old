@@ -125,8 +125,7 @@ try:
                 exit(1)
             # client reads stdin and forwards to socket
             while True:
-                data = sys.stdin.buffer.read()
-                debug("send")
+                data = sys.stdin.buffer.read1(2048)
                 if len(data) == 0:  # no data will be available
                     break
                 try:
@@ -175,7 +174,6 @@ try:
                     # client reads socket and forwards to stdout
                     while True:
                         data = tcp_socket.recv(2048)
-                        debug("received")
                         if len(data) == 0:  # no data will be available
                             break
                         try:
