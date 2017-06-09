@@ -172,14 +172,14 @@ try:
                     # set socket keep alive interval, in case NAT cut the connection
                     # see http://www.tldp.org/HOWTO/html_single/TCP-Keepalive-HOWTO/#setsockopt
                     tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    tcp_socket.setblocking(False)
                     # client reads socket and forwards to stdout
                     while True:
                         data = tcp_socket.recv(2048)
+                        debug("received")
                         if len(data) == 0:  # no data will be available
                             break
                         try:
-                            sys.stdout.write(data)
+                            sys.stdout.buffer.write(data)
                         except OSError:
                             debug("stdout write fail")
                             break
